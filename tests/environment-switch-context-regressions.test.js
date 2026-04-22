@@ -71,8 +71,6 @@ test("environment-switch rerun handlers consume the fresh environment payload be
   const megSource = read("meg-workspace.js");
   const tempPassSource = read("temp-pass-workspace.js");
   const degradationSource = read("degradation-workspace.js");
-  const esmHealthSource = read("esm-health-workspace.js");
-  const cmHealthSource = read("cm-health-workspace.js");
 
   assert.match(esmSource, /if \(event === "environment-switch-rerun"\) \{[\s\S]*?applyWorkspaceAdobePassEnvironment\(payload\.adobePassEnvironment\);/);
   assert.match(cmSource, /if \(event === "environment-switch-rerun"\) \{[\s\S]*?applyWorkspaceAdobePassEnvironment\(payload\.adobePassEnvironment\);/);
@@ -80,8 +78,6 @@ test("environment-switch rerun handlers consume the fresh environment payload be
   assert.match(megSource, /if \(normalizedEvent === "environment-switch-rerun"\) \{[\s\S]*?applyWorkspaceEnvironmentFromEventPayload\(payload\);/);
   assert.match(tempPassSource, /if \(event === "environment-switch-rerun"\) \{[\s\S]*?state\.adobePassEnvironment = [\s\S]*?renderWorkspaceEnvironmentBadge\(\);/);
   assert.match(degradationSource, /if \(event === "environment-switch-rerun"\) \{[\s\S]*?state\.adobePassEnvironment = resolveWorkspaceAdobePassEnvironment\(payload\.adobePassEnvironment\);[\s\S]*?renderWorkspaceEnvironmentBadge\(\);/);
-  assert.match(esmHealthSource, /if \(event === "environment-switch-rerun"\) \{[\s\S]*?state\.environmentKey = String\(environment\?\.key \|\| state\.environmentKey \|\| ""\)\.trim\(\);[\s\S]*?renderWorkspaceEnvironmentBadge\(\);/);
-  assert.match(cmHealthSource, /if \(event === "environment-switch-rerun"\) \{[\s\S]*?state\.environmentKey = String\(environment\?\.key \|\| state\.environmentKey \|\| ""\)\.trim\(\);[\s\S]*?renderWorkspaceEnvironmentBadge\(\);/);
 });
 
 test("environment-switch restore and media-company changes both converge on hydrateProgrammerSelection", () => {
@@ -99,8 +95,6 @@ test("workspace badge renderers persist current environment identity for redraw 
     read("cm-workspace.js"),
     read("temp-pass-workspace.js"),
     read("degradation-workspace.js"),
-    read("esm-health-workspace.js"),
-    read("cm-health-workspace.js"),
     read("meg-workspace.js"),
     read("blondie-time-workspace.js"),
   ].join("\n");

@@ -191,106 +191,6 @@ test("REST V2 profile correlation records pretty-print profile check previews fo
   assert.match(records[0].payload.items[0].ProfileResponsePayloadJson, /\n  "profiles": \{/);
 });
 
-test("ESM health correlation record carries scoped requestor and mvpd context", () => {
-  const { cmBuildEsmHealthCorrelationRecords } = loadFunctions("popup.js", ["cmBuildEsmHealthCorrelationRecords"], {
-    buildEsmHealthReportPath: () => "year/month/day/requestor-id/proxy/mvpd/platform.json",
-    buildEsmHealthDashboardQueryContext: (context = {}) => ({
-      ...context,
-      start: "2026-03-23",
-      end: "2026-03-24",
-    }),
-    buildEsmHealthRequestUrl: (reportPath, queryContext, options = {}) =>
-      `https://example.test/${reportPath}?requestor-id=${encodeURIComponent(queryContext.baseRequestorIds[0] || "")}&mvpd=${encodeURIComponent(
-        queryContext.baseMvpdIds[0] || ""
-      )}&limit=${encodeURIComponent(String(options.limit || ""))}`,
-    cloneJsonLikeValue: (value) => JSON.parse(JSON.stringify(value)),
-    cmBuildCrossReferenceRowMeta: () => ({
-      MediaCompany: "FOX",
-      Environment: "production",
-      CmTenantScope: "fox-tenant",
-      CmMatchedTenantCount: 1,
-      CmMatchedTenants: "FOX Tenant",
-      RestV2App: "REST V2 App",
-      RestV2AppGuid: "rest-guid",
-      EsmApp: "ESM App",
-      EsmAppGuid: "esm-guid",
-    }),
-    cmBuildRecordId: (kind, tenantId, entityId) => `${kind}:${tenantId}:${entityId}`,
-    cmBuildCrossReferenceLabel: (requestorId, mvpd) => `${requestorId} x ${mvpd}`,
-    cmColumnsFromPayload: (payload) => Object.keys((payload && payload.items && payload.items[0]) || {}),
-    ESM_HEALTH_BREAKDOWN_LIMIT: 500,
-  });
-
-  const records = cmBuildEsmHealthCorrelationRecords({
-    programmerId: "fox",
-    programmerName: "FOX",
-    requestorId: "FBC",
-    mvpd: "comcast",
-    mvpdMeta: { id: "comcast", name: "Comcast" },
-    mvpdLabel: "Comcast",
-    esmApp: { guid: "esm-guid", appName: "ESM App" },
-  });
-
-  assert.equal(records.length, 1);
-  assert.equal(records[0].kind, "esm-health-xref");
-  assert.equal(records[0].title, "ESM Health Scope");
-  assert.match(records[0].requestUrl, /requestor-id=FBC/);
-  assert.match(records[0].requestUrl, /mvpd=comcast/);
-  assert.equal(records[0].payload.items[0].RequestorId, "FBC");
-  assert.equal(records[0].payload.items[0].MvpdLabel, "Comcast");
-});
-
-test("CM ESM Health Scope saved queries keep requestor and MVPD context in the saved query name", async () => {
-  let persisted = null;
-  const { cmBuildEsmHealthXrefSavedQueryName, cmPersistEsmHealthXrefSavedQuery } = loadFunctions(
-    "popup.js",
-    ["cmBuildEsmHealthXrefSavedQueryName", "cmPersistEsmHealthXrefSavedQuery"],
-    {
-      state: {
-        selectedRequestorId: "",
-        selectedMvpdId: "",
-      },
-      firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
-      getRestV2MvpdPickerLabel: (_requestorId, mvpdId, mvpdMeta) => String(mvpdMeta?.name || mvpdId || "").trim(),
-      cmBuildCrossReferenceLabel: (requestorId = "", _mvpdId = "", mvpdMeta = null) =>
-        `${String(requestorId || "").trim()} x ${String(mvpdMeta?.name || "").trim()}`,
-      popupNormalizeSavedEsmQueryName: (value = "") => String(value || "").replace(/\s+/g, " ").trim(),
-      normalizeUnderparEsmRequestPath: (value = "") => String(value || "").replace(/^https:\/\/[^/]+/, ""),
-      stripMegWorkspaceScopedQueryParams: (value = "") => String(value || "").trim(),
-      popupPersistSavedEsmQueryRecord: async (name = "", url = "") => {
-        persisted = { name, url };
-        return { storageKey: `underpar:saved-esm-query:${encodeURIComponent(name)}`, existed: false };
-      },
-      cmResolveEsmHealthXrefRecordConfig: () => ({ requestUrl: "https://mgmt.auth.adobe.com/api/v1/esm/report?limit=250" }),
-    }
-  );
-
-  const record = {
-    title: "ESM Health Scope",
-    payload: {
-      requestorId: "MML",
-      mvpd: "Comcast_SSO",
-      mvpdLabel: "Xfinity (Comcast_SSO)",
-    },
-  };
-
-  assert.equal(cmBuildEsmHealthXrefSavedQueryName(record, null), "ESM Health Scope MML x Xfinity (Comcast_SSO)");
-
-  const result = await cmPersistEsmHealthXrefSavedQuery(
-    record,
-    null,
-    "https://mgmt.auth.adobe.com/api/v1/esm/report?requestor-id=MML&mvpd=Comcast_SSO"
-  );
-
-  assert.deepEqual(persisted, {
-    name: "ESM Health Scope MML x Xfinity (Comcast_SSO)",
-    url: "/api/v1/esm/report?requestor-id=MML&mvpd=Comcast_SSO",
-  });
-  assert.equal(result.ok, true);
-  assert.equal(result.savedQueryName, "ESM Health Scope MML x Xfinity (Comcast_SSO)");
-  assert.equal(result.savedQueryUrl, "/api/v1/esm/report?requestor-id=MML&mvpd=Comcast_SSO");
-});
-
 test("CM workspace JSON cells render structured metadata instead of raw JSON dumps", () => {
   const documentStub = {
     createElement(tagName) {
@@ -399,8 +299,6 @@ test("workspace dataset exposes the CM V2 live API group", () => {
   assert.match(popupSource, /const cmV2OperationRecords = cmBuildCmV2OperationRecords\(programmer, credentialHints\);/);
   assert.match(popupSource, /label: "CM V2 Live APIs"/);
   assert.match(popupSource, /label: "Live Cross References"/);
-  assert.match(
-    popupSource,
-    /if \(recordKind === "esm-health-xref"\) \{[\s\S]*?await cmPersistEsmHealthXrefSavedQuery\(record, cmState, requestUrl\);[\s\S]*?const response = await cmFetchEsmHealthXrefReport\(record, cmState\);/
-  );
+  assert.doesNotMatch(popupSource, /cmBuildEsmHealthCorrelationRecords/);
+  assert.doesNotMatch(popupSource, /esm-health-xref/);
 });

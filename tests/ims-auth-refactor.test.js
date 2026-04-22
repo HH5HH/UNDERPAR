@@ -1387,44 +1387,15 @@ test("esm health reuses the hydrated ESM premium service auth context instead of
   assert.doesNotMatch(popupSource, /const ESM_HEALTH_TENANT_TOKEN_PATH =/);
 });
 
-test("health workspace readiness now keys off hydrated premium-service context", () => {
-  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const esmControllerSource = extractFunctionSource(popupSource, "esmHealthWorkspaceGetSelectedControllerStatePayload");
-  const healthControllerSource = extractFunctionSource(popupSource, "healthWorkspaceGetSelectedControllerStatePayload");
-  const statusItemSource = extractFunctionSource(popupSource, "buildHrContextHealthStatusItemHtml");
-  const healthSnapshotSource = extractFunctionSource(popupSource, "getHealthWorkspacePremiumContextSnapshot");
-  const hrRevealSource = extractFunctionSource(popupSource, "shouldRevealHrContextSections");
-
-  assert.match(popupSource, /function hasResolvedCmAvailabilityForProgrammer\(/);
-  assert.match(popupSource, /function isProgrammerHrContextHydrationReady\(/);
-  assert.match(esmControllerSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(context\?\.programmerId \|\| ""\)\.trim\(\)\);/);
-  assert.match(esmControllerSource, /esmHealthReady: Boolean\(context\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
-  assert.match(healthControllerSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(context\?\.programmerId \|\| ""\)\.trim\(\)\);/);
-  assert.match(healthControllerSource, /healthReady: Boolean\(context\?\.programmerId && context\?\.requestorId && premiumContext\?\.hydrationReady\)/);
-  assert.match(healthSnapshotSource, /isProgrammerHrContextHydrationReady\(normalizedProgrammerId,\s*services\)/);
-  assert.match(hrRevealSource, /isProgrammerHrContextHydrationReady\(programmerId,\s*services\)/);
-  assert.match(statusItemSource, /const premiumContext = getHealthWorkspacePremiumContextSnapshot\(String\(selectionContext\?\.programmerId \|\| ""\)\.trim\(\)\);/);
-  assert.match(statusItemSource, /const esmVisible = Boolean\(selectionContext\?\.programmerId && premiumContext\?\.hydrationReady && premiumContext\?\.esmAvailable\)/);
-  assert.match(statusItemSource, /const esmReady = esmVisible;/);
-  assert.match(statusItemSource, /const cmVisible = Boolean\(selectionContext\?\.programmerId && premiumContext\?\.hydrationReady && shouldShowCmService\(services\?\.cm\)\)/);
-  assert.match(statusItemSource, /const cmReady = cmVisible;/);
-  assert.match(statusItemSource, /const esmButtonHtml = esmVisible/);
-  assert.match(statusItemSource, /const cmButtonHtml = cmVisible/);
-  assert.match(statusItemSource, /const adobePassWorkflowActive =/);
-  assert.match(statusItemSource, /"Adobe Pass org required"/);
-});
-
 test("esm health treats an unavailable uniques dataset as optional instead of failing the whole dashboard", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const reportPayloadSource = extractFunctionSource(popupSource, "buildEsmHealthDashboardReportPayload");
   const loadReportSource = extractFunctionSource(popupSource, "loadEsmHealthDashboardReportPayload");
-  const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
 
   assert.match(reportPayloadSource, /const ignoredSections = new Set\(/);
   assert.match(reportPayloadSource, /const effectiveSections = requestedSections\.filter\(\(key\) => !ignoredSections\.has\(key\)\);/);
   assert.match(loadReportSource, /const uniquesUnsupported = Number\(uniquesResult\?\.status \|\| 0\) === 404;/);
   assert.match(loadReportSource, /ignoredSections\.push\("uniques"\);/);
-  assert.match(runSource, /const comparison = await loadEsmHealthDashboardComparison\(queryContext/);
 
   const script = [
     'function normalizeEsmHealthGranularity(value = "") { const normalized = String(value || "").trim().toLowerCase(); return normalized === "hour" || normalized === "day" || normalized === "month" ? normalized : "hour"; }',
@@ -1604,52 +1575,8 @@ test("ESM health request URL can explicitly drop MVPD filters for MVPD-incompati
   assert.deepEqual(overrideUrl.searchParams.getAll("platform"), ["Apple"]);
 });
 
-test("health workspaces render full-width collapsible report sections and expose the richer ESM health breakdowns", () => {
-  const healthWorkspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
-  const healthWorkspaceCss = fs.readFileSync(path.join(ROOT, "health-workspace.css"), "utf8");
-  const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
-  const esmHealthWorkspaceCss = fs.readFileSync(path.join(ROOT, "esm-health-workspace.css"), "utf8");
-  const esmHealthWorkspaceHtml = fs.readFileSync(path.join(ROOT, "esm-health-workspace.html"), "utf8");
-  const cmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "cm-health-workspace.js"), "utf8");
-
-  assert.match(healthWorkspaceSource, /<details class="rest-report-card health-report-card health-report-collapsible/);
-  assert.match(healthWorkspaceCss, /\.health-report-grid\s*\{\s*display:\s*flex;/);
-  assert.match(healthWorkspaceCss, /\.health-report-summary\s*\{/);
-
-  assert.match(esmHealthWorkspaceSource, /"Application Versions"/);
-  assert.match(esmHealthWorkspaceSource, /"API Entry Points"/);
-  assert.match(esmHealthWorkspaceSource, /"SDK Versions"/);
-  assert.match(esmHealthWorkspaceSource, /"Failure Reasons"/);
-  assert.match(esmHealthWorkspaceSource, /renderInsightCards\(report\)/);
-  assert.match(esmHealthWorkspaceHtml, /<body class="spectrum spectrum--medium spectrum--dark">/);
-  assert.match(esmHealthWorkspaceHtml, /class="spectrum-Button spectrum-Button--primary workspace-text-btn workspace-text-btn--accent"/);
-  assert.match(esmHealthWorkspaceHtml, /id="workspace-window-select"/);
-  assert.match(esmHealthWorkspaceHtml, /id="workspace-advanced-filters"/);
-  assert.match(esmHealthWorkspaceHtml, /id="workspace-apply-advanced-dates"/);
-  assert.doesNotMatch(esmHealthWorkspaceHtml, /workspace-compare-select/);
-  assert.doesNotMatch(esmHealthWorkspaceHtml, /workspace-granularity-select/);
-  assert.doesNotMatch(esmHealthWorkspaceHtml, /workspace-active-pills/);
-  assert.match(esmHealthWorkspaceCss, /@import url\("underpar-env-badge\.css"\);/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-filter-actions\s*\{[\s\S]*grid-template-columns:\s*minmax\(220px,\s*320px\) minmax\(0,\s*1fr\);/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-advanced-panel\s*\{/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-advanced-grid\s*\{/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-table-grid\s*\{\s*display:\s*flex;/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-section-summary\s*\{/);
-  assert.match(esmHealthWorkspaceSource, /data-sparkline-chart/);
-  assert.match(esmHealthWorkspaceSource, /bindSparklineTooltips\(\);/);
-  assert.match(esmHealthWorkspaceSource, /addEventListener\("mousemove"/);
-  assert.match(esmHealthWorkspaceSource, /tabindex="0"/);
-  assert.match(esmHealthWorkspaceCss, /\.esm-health-chart-tooltip\s*\{/);
-  assert.match(cmHealthWorkspaceSource, /data-sparkline-chart/);
-  assert.match(cmHealthWorkspaceSource, /bindSparklineTooltips\(\);/);
-  assert.doesNotMatch(esmHealthWorkspaceSource, /Media Company/);
-  assert.doesNotMatch(esmHealthWorkspaceSource, /Clientless Failure/);
-  assert.doesNotMatch(esmHealthWorkspaceSource, /clientlessFailureRate/);
-});
-
 test("esm health ignores deprecated clientless metrics in aggregation and workspace UI", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
   const script = [
     'const ESM_DEPRECATED_COLUMN_KEYS = new Set(["clientless-failures", "clientless-tokens"]);',
     'const ESM_HEALTH_DEFAULT_GRANULARITY = "hour";',
@@ -1677,8 +1604,6 @@ test("esm health ignores deprecated clientless metrics in aggregation and worksp
   } = context.module.exports;
 
   assert.match(popupSource, /const ESM_DEPRECATED_COLUMN_KEYS = new Set\(\["clientless-failures", "clientless-tokens"\]\);/);
-  assert.doesNotMatch(esmHealthWorkspaceSource, /Clientless Failure/);
-  assert.doesNotMatch(esmHealthWorkspaceSource, /clientlessFailureRate/);
   assert.equal(getEsmHealthMetricNumber({ "clientless-failures": 9 }, "clientless-failures"), 0);
 
   const derived = computeEsmHealthDerivedMetrics({
@@ -1775,72 +1700,6 @@ test("esm health failure reasons keep only failed event rows", () => {
   );
 });
 
-test("health status UI stays pill-only and premium recording controls stay icon-only with hover labels", () => {
-  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
-  const healthStatusSource = extractFunctionSource(popupSource, "buildHrContextHealthStatusItemHtml");
-  const esmRecordingSource = extractFunctionSource(popupSource, "syncEsmWorkspaceRecordingControls");
-  const degradationRecordingSource = extractFunctionSource(popupSource, "syncDegradationWorkspaceRecordingControls");
-
-  assert.doesNotMatch(healthStatusSource, /hr-health-status-copy/);
-  assert.doesNotMatch(healthStatusSource, /hr-health-status-meta/);
-  assert.match(healthStatusSource, /<div class="hr-health-action-row" role="group"/);
-  assert.doesNotMatch(popupSource, /esm-workspace-record-btn-label/);
-  assert.doesNotMatch(popupSource, /degradation-record-btn-label/);
-  assert.doesNotMatch(esmRecordingSource, /label\.textContent/);
-  assert.doesNotMatch(degradationRecordingSource, /label\.textContent/);
-  assert.match(popupCss, /\.hr-health-action-row\s*\{\s*display:\s*grid;/);
-  assert.match(popupCss, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
-  assert.match(popupCss, /\.esm-workspace-record-toggle-btn\s*\{[\s\S]*width:\s*36px;/);
-  assert.match(popupCss, /\.degradation-record-toggle-btn\s*\{[\s\S]*width:\s*36px;/);
-});
-
-test("esm health rebinds to the live controller context and resets to controller defaults across ENV x Media Company switches", () => {
-  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const esmHealthWorkspaceSource = fs.readFileSync(path.join(ROOT, "esm-health-workspace.js"), "utf8");
-  const healthWorkspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
-  const healthWorkspaceHtml = fs.readFileSync(path.join(ROOT, "health-workspace.html"), "utf8");
-  const controllerPayloadSource = extractFunctionSource(popupSource, "esmHealthWorkspaceGetSelectedControllerStatePayload");
-  const refreshActionSource = extractFunctionSource(popupSource, "handleEsmHealthWorkspaceAction");
-  const runSource = extractFunctionSource(popupSource, "runEsmHealthDashboardForSelection");
-  const rebaseSource = extractFunctionSource(popupSource, "rebaseEsmHealthDashboardQueryContextForCurrentSelection");
-  const applyControllerSource = extractFunctionSource(esmHealthWorkspaceSource, "applyControllerState");
-  const handleWorkspaceEventSource = extractFunctionSource(esmHealthWorkspaceSource, "handleWorkspaceEvent");
-  const rerunSource = extractFunctionSource(esmHealthWorkspaceSource, "rerunLatestReport");
-
-  assert.match(popupSource, /function buildEsmHealthWorkspaceControllerContextKey\(/);
-  assert.match(controllerPayloadSource, /premiumPanelRequestToken,/);
-  assert.match(controllerPayloadSource, /workspaceContextKey:\s*buildEsmHealthWorkspaceControllerContextKey\(context,\s*premiumPanelRequestToken\)/);
-  assert.match(rebaseSource, /const currentSelectionContext = esmHealthWorkspaceGetSelectionContext\(resolveSelectedProgrammer\(\)\);/);
-  assert.match(rebaseSource, /const sameControllerSelection =/);
-  assert.match(rebaseSource, /if \(sameControllerSelection\) \{/);
-  assert.match(refreshActionSource, /rebaseEsmHealthDashboardQueryContextForCurrentSelection\(queryContext,\s*\{/);
-  assert.match(runSource, /const premiumPanelRequestToken = Math\.max\(0,\s*Number\(options\?\.requestToken \|\| state\.premiumPanelRequestToken \|\| 0\)\);/);
-  assert.match(runSource, /const workspaceContextKey = buildEsmHealthWorkspaceControllerContextKey\(queryContext,\s*premiumPanelRequestToken\);/);
-  assert.match(runSource, /premiumPanelRequestToken,/);
-  assert.match(runSource, /workspaceContextKey,/);
-
-  assert.match(esmHealthWorkspaceSource, /function doesWorkspaceEventMatchCurrentContext\(payload = \{\}\)/);
-  assert.match(esmHealthWorkspaceSource, /function hasLiveControllerContext\(\)/);
-  assert.match(applyControllerSource, /const runtimeContextChanged =/);
-  assert.match(applyControllerSource, /const readinessActivated = !previousEsmHealthReady && payload\?\.esmHealthReady === true;/);
-  assert.match(applyControllerSource, /const shouldAutoRefreshForControllerUpdate =/);
-  assert.match(applyControllerSource, /if \(controllerChanged\) \{/);
-  assert.match(applyControllerSource, /resetQueryToControllerDefaults\(\);/);
-  assert.doesNotMatch(applyControllerSource, /preservedDates/);
-  assert.match(applyControllerSource, /state\.loading = false;/);
-  assert.match(applyControllerSource, /if \(shouldAutoRefreshForControllerUpdate\) \{\s*void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
-  assert.match(handleWorkspaceEventSource, /const shouldEnforceContextMatch = \(event === "report-start" \|\| event === "report-result"\) && hasLiveControllerContext\(\);/);
-  assert.match(handleWorkspaceEventSource, /if \(shouldEnforceContextMatch && !doesWorkspaceEventMatchCurrentContext\(payload\)\) \{/);
-  assert.match(handleWorkspaceEventSource, /void runDashboard\("Refreshing ESM HEALTH dashboard for the selected UnderPAR context\.\.\."\);/);
-  assert.match(rerunSource, /await runDashboard\("Refreshing ESM HEALTH dashboard\.\.\."\);/);
-  assert.match(healthWorkspaceSource, /SPLUNK HEALTH Dashboard \|/);
-  assert.match(healthWorkspaceSource, /No SPLUNK HEALTH report loaded yet\./);
-  assert.match(healthWorkspaceSource, /SPLUNK HEALTH Dashboard/);
-  assert.match(healthWorkspaceHtml, /UP SPLUNK HEALTH Workspace/);
-  assert.match(healthWorkspaceHtml, /Re-run latest SPLUNK HEALTH queries/);
-});
-
 test("esm workspace waits for workspace-ready and resolves the live premium request token before running JellyBeans", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const ensureSource = extractFunctionSource(popupSource, "esmWorkspaceEnsureWorkspaceTab");
@@ -1909,136 +1768,6 @@ test("premium service refresh and CMU actions keep ESM and CM JellyBeans on the 
   assert.match(dgrAuthSource, /!isDegradationServiceRequestActive\(panelState\.section,\s*liveRequestToken,\s*programmer\.programmerId\)/);
   assert.match(cmAuthSource, /const liveRequestToken = resolveCurrentPremiumPanelRequestToken\(programmer\.programmerId,\s*requestToken\);/);
   assert.match(cmAuthSource, /!isCmServiceRequestActive\(context\.section,\s*liveRequestToken,\s*programmer\.programmerId\)/);
-});
-
-test("health splunk stays on the scoped job-create and results-preview calls instead of recreating the dashboard transport", () => {
-  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const normalizeJobSource = extractFunctionSource(popupSource, "normalizeSplunkJobSearchQuery");
-  const healthDashboardUrlSource = extractFunctionSource(popupSource, "buildHealthSplunkDashboardUrl");
-  const healthQueryContextSource = extractFunctionSource(popupSource, "buildHealthSplunkQueryContext");
-  const tableDefinitionsSource = extractFunctionSource(popupSource, "getHealthSplunkTableDefinitions");
-  const previewSource = extractFunctionSource(popupSource, "fetchHealthSplunkPreviewReportBySid");
-  const tableSearchSource = extractFunctionSource(popupSource, "runHealthSplunkTableSearch");
-  const dashboardRunSource = extractFunctionSource(popupSource, "runHealthSplunkDashboardForSelection");
-  const restSearchSource = extractFunctionSource(popupSource, "runSplunkSearchForQueryContext");
-
-  assert.match(healthQueryContextSource, /search:\s*buildHealthSplunkLoginSearch\(\{/);
-  assert.match(healthQueryContextSource, /const dashboardUrl = buildHealthSplunkDashboardUrl\(\{/);
-  assert.match(healthQueryContextSource, /dashboardUrl,/);
-  assert.match(healthDashboardUrlSource, /HEALTH_SPLUNK_DASHBOARD_VIEW_NAME/);
-  assert.match(healthDashboardUrlSource, /form\.serviceProvider/);
-  assert.match(healthDashboardUrlSource, /form\.environment/);
-  assert.match(tableDefinitionsSource, /jobLabel:\s*String\(entry\.jobLabel \|\| ""\)\.trim\(\),/);
-  assert.match(normalizeJobSource, /return `search \$\{normalizedSearch\}`;/);
-  assert.match(previewSource, /const previewUrl = `\$\{HEALTH_SPLUNK_RESULTS_PREVIEW_BASE_URL\}\/\$\{encodedSid\}\/results_preview\?/);
-  assert.match(previewSource, /if \(report\.rows\.length > 0 \|\| isHealthSplunkPreviewComplete\(previewResponse\.parsed\)\) {/);
-  assert.match(previewSource, /waitForDelay\(HEALTH_SPLUNK_JOB_POLL_INTERVAL_MS\)/);
-  assert.match(previewSource, /HEALTH_SPLUNK_JOB_POLL_TIMEOUT_MS/);
-  assert.doesNotMatch(previewSource, /resultsUrl/);
-  assert.doesNotMatch(previewSource, /jobMetaUrl/);
-  assert.match(tableSearchSource, /search: normalizeSplunkJobSearchQuery\(compiledTable\.query\),/);
-  assert.match(tableSearchSource, /sid:\s*""/);
-  assert.match(tableSearchSource, /check_risky_command:\s*"true"/);
-  assert.match(tableSearchSource, /preview:\s*"true"/);
-  assert.match(tableSearchSource, /const createUrl = HEALTH_SPLUNK_JOB_CREATE_URL;/);
-  assert.match(tableSearchSource, /provenance:\s*`UI:dashboard:\$\{HEALTH_SPLUNK_DASHBOARD_VIEW_NAME\}`/);
-  assert.match(tableSearchSource, /label:\s*String\(compiledTable\.jobLabel \|\| compiledTable\.key \|\| compiledTable\.title \|\| "health-splunk-table"\)\.trim\(\)/);
-  assert.match(restSearchSource, /search: normalizeSplunkJobSearchQuery\(queryContext\.search\),/);
-  assert.doesNotMatch(popupSource, /function parseHealthSplunkTableDefinitionsFromDashboardDefinition/);
-  assert.doesNotMatch(popupSource, /function resolveHealthSplunkTableDefinitions/);
-  assert.doesNotMatch(dashboardRunSource, /resolveHealthSplunkTableDefinitions\(/);
-  assert.match(dashboardRunSource, /const scopedTables = getHealthSplunkTableDefinitions\(queryContext\);/);
-  assert.match(dashboardRunSource, /const resolvedTables = scopedTables\.slice\(\);/);
-  assert.match(dashboardRunSource, /await Promise\.all\(/);
-});
-
-test("health splunk MVPD error rows can cross-reference into the live ESM event tree", () => {
-  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const healthWorkspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
-  const healthWorkspaceCss = fs.readFileSync(path.join(ROOT, "health-workspace.css"), "utf8");
-  const bridgeRunSource = extractFunctionSource(popupSource, "runHealthSplunkEsmBridgeForTable");
-  const requestUrlSource = extractFunctionSource(popupSource, "buildEsmHealthRequestUrl");
-  const workspaceActionSource = extractFunctionSource(popupSource, "handleHealthWorkspaceAction");
-
-  assert.match(popupSource, /const HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_TABLE_KEY = "sev2_mvpd_error_codes";/);
-  assert.match(popupSource, /const HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_PATH = "year\/month\/day\/hour\/minute\/event\/requestor-id\/proxy\/mvpd\/reason\/dc\.json";/);
-  assert.match(bridgeRunSource, /fetchEsmHealthJson\(bridgeContext,\s*HEALTH_SPLUNK_ESM_BRIDGE_MVPD_ERROR_PATH,\s*\{/);
-  assert.match(bridgeRunSource, /requestorIds:\s*bridgeContext\.requestorIds,/);
-  assert.match(bridgeRunSource, /mvpdIds:\s*bridgeContext\.mvpdIds,/);
-  assert.match(bridgeRunSource, /events:\s*bridgeContext\.events,/);
-  assert.match(requestUrlSource, /searchParams\.append\("event",\s*value\)/);
-  assert.match(workspaceActionSource, /if \(action === "load-esm-bridge"\) \{/);
-  assert.match(workspaceActionSource, /const latestReport = healthWorkspaceGetLatestReport\(selectionKey\);/);
-  assert.match(workspaceActionSource, /const bridgeResult = await runHealthSplunkEsmBridgeForTable\(queryContext,\s*latestTable\);/);
-  assert.match(healthWorkspaceSource, /const HEALTH_SPLUNK_ESM_BRIDGE_TABLE_KEY = "sev2_mvpd_error_codes";/);
-  assert.match(healthWorkspaceSource, /data-health-esm-bridge-action="load"/);
-  assert.match(healthWorkspaceSource, /function renderEsmBridgeResult\(table = null\)/);
-  assert.match(healthWorkspaceSource, /void loadEsmBridgeForTable\(target\.dataset\.healthEsmBridgeTableKey \|\| ""\);/);
-  assert.match(healthWorkspaceCss, /\.health-report-summary-action-btn\s*\{/);
-  assert.match(healthWorkspaceCss, /\.health-report-bridge\s*\{/);
-});
-
-test("health splunk keeps auth wait in a pending state instead of hard-failing the workspace", () => {
-  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const tableResultSource = extractFunctionSource(popupSource, "buildHealthSplunkTableResult");
-  const reportPayloadSource = extractFunctionSource(popupSource, "buildHealthSplunkDashboardReportPayload");
-  const dashboardRunSource = extractFunctionSource(popupSource, "runHealthSplunkDashboardForSelection");
-  const workspaceSource = fs.readFileSync(path.join(ROOT, "health-workspace.js"), "utf8");
-
-  assert.match(tableResultSource, /pending:\s*options\.pending === true,/);
-  assert.match(tableResultSource, /authPending:\s*options\.authPending === true,/);
-  assert.match(reportPayloadSource, /const pendingCount = tables\.filter\(\(entry\) => entry\?\.pending === true\)\.length;/);
-  assert.match(reportPayloadSource, /pending,\s*\n\s*authPending:/);
-  assert.match(reportPayloadSource, /pendingMessage:\s*pending/);
-  assert.doesNotMatch(reportPayloadSource, /fallbackUsed/);
-  assert.match(dashboardRunSource, /pending:\s*true,/);
-  assert.match(dashboardRunSource, /authPending:\s*true,/);
-  assert.match(dashboardRunSource, /pendingMessage: firstNonEmptyString\(\[/);
-  assert.match(workspaceSource, /if \(state\.report\.pending === true\) {/);
-  assert.doesNotMatch(workspaceSource, /fallbackUsed/);
-});
-
-test("health splunk preview parser reads dashboard-studio json_cols rows from HAR-style payloads", () => {
-  const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const script = [
-    "function firstNonEmptyString(values = []) { for (const value of Array.isArray(values) ? values : []) { const text = String(value ?? '').trim(); if (text) { return text; } } return ''; }",
-    extractFunctionSource(popupSource, "normalizeSplunkCellValue"),
-    extractFunctionSource(popupSource, "extractSplunkRowsFromResponsePayload"),
-    extractFunctionSource(popupSource, "extractSplunkFieldsFromResponsePayload"),
-    extractFunctionSource(popupSource, "collectSplunkColumnOrder"),
-    extractFunctionSource(popupSource, "buildSplunkRowDedupeKey"),
-    extractFunctionSource(popupSource, "dedupeSplunkRows"),
-    extractFunctionSource(popupSource, "normalizeSplunkRows"),
-    extractFunctionSource(popupSource, "parseSplunkPreviewRowsPayload"),
-    "module.exports = { parseSplunkPreviewRowsPayload };",
-  ].join("\n\n");
-  const context = {
-    module: { exports: {} },
-    exports: {},
-  };
-  vm.runInNewContext(script, context, { filename: path.join(ROOT, "popup.js") });
-  const { parseSplunkPreviewRowsPayload } = context.module.exports;
-
-  const parsed = parseSplunkPreviewRowsPayload({
-    preview: false,
-    fields: [{ name: "serviceProvider" }, { name: "access_token" }, { name: "count" }],
-    columns: [["MML", "MML"], ["token-a", "token-b"], ["7", "3"]],
-  });
-
-  assert.deepEqual(Array.from(parsed.columns || []), ["serviceProvider", "access_token", "count"]);
-  assert.equal(parsed.totalRows, 2);
-  assert.deepEqual(JSON.parse(JSON.stringify(parsed.rows)), [
-    {
-      serviceProvider: "MML",
-      access_token: "token-a",
-      count: "7",
-    },
-    {
-      serviceProvider: "MML",
-      access_token: "token-b",
-      count: "3",
-    },
-  ]);
 });
 
 test("programmer endpoint access_denied responses stay on the limited console path", () => {
@@ -4618,13 +4347,15 @@ test("sidepanel requestor picker spans the same full workflow width as media com
   );
 });
 
-test("health status action pills shrink-wrap their labels like the rest of UnderPAR", () => {
+test("health status keeps a single free-floating REG APPS pill", () => {
   const popupSource = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
   const healthStatusSource = extractFunctionSource(popupSource, "buildHrContextHealthStatusItemHtml");
 
-  assert.match(healthStatusSource, />ESM<\/button>/);
-  assert.match(healthStatusSource, />SPLUNK<\/button>/);
+  assert.match(healthStatusSource, />REG APPS<\/button>/);
+  assert.doesNotMatch(healthStatusSource, />ESM<\/button>/);
+  assert.doesNotMatch(healthStatusSource, />CM<\/button>/);
+  assert.doesNotMatch(healthStatusSource, />SPLUNK<\/button>/);
   assert.match(popupCss, /\.hr-health-action-row\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?align-self:\s*flex-start;/);
   assert.match(popupCss, /\.hr-health-action-btn\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?flex:\s*0 0 auto;[\s\S]*?white-space:\s*nowrap;/);
 });

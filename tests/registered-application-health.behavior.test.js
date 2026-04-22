@@ -1937,6 +1937,7 @@ test("registered application workspace suppresses duplicate requestor summary me
 test("registered application health sources wire the HEALTH action and workspace assets", () => {
   const popupHtml = read("popup.html");
   const popupSource = read("popup.js");
+  const handleHealthActionSource = extractFunctionSource(popupSource, "handleHrContextHealthAction");
   const backgroundSource = read("background.js");
   const manifestSource = read("manifest.json");
   const workspaceHtml = read("registered-application-health-workspace.html");
@@ -1944,11 +1945,12 @@ test("registered application health sources wire the HEALTH action and workspace
   const workspaceCss = read("registered-application-health-workspace.css");
   const sharedJwtSource = read("underpar-jwt-inspector.js");
 
-  assert.match(
-    popupSource,
-    /data-health-action="esm"[\s\S]*data-health-action="cm"[\s\S]*data-health-action="registered-apps"[\s\S]*data-health-action="splunk"/
-  );
-  assert.match(popupSource, /if \(normalizedAction === "registered-apps"\)[\s\S]*runRegisteredApplicationHealthDashboardForSelection/);
+  assert.match(popupSource, /data-health-action="registered-apps"/);
+  assert.doesNotMatch(popupSource, /data-health-action="esm"/);
+  assert.doesNotMatch(popupSource, /data-health-action="cm"/);
+  assert.doesNotMatch(popupSource, /data-health-action="splunk"/);
+  assert.match(handleHealthActionSource, /if \(normalizedAction === "registered-apps"\)[\s\S]*runRegisteredApplicationHealthDashboardForSelection/);
+  assert.doesNotMatch(handleHealthActionSource, /Select a Content Provider first\./);
   assert.match(backgroundSource, /registered-application-health-workspace\.html/);
   assert.match(manifestSource, /registered-application-health-workspace\.js/);
   assert.match(popupSource, /JWT Inspector/);

@@ -2732,12 +2732,11 @@ select:disabled {
 }
 
 .hr-health-action-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: inline-flex;
   align-items: center;
-  align-self: stretch;
+  align-self: flex-start;
   gap: 10px;
-  width: 100%;
+  width: auto;
   margin: 0;
   padding: 0;
 }
@@ -2745,9 +2744,10 @@ select:disabled {
 .hr-health-action-btn {
   appearance: none;
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 100%;
+  width: auto;
   min-height: 30px;
   padding: 0 16px;
   border-radius: 999px;
@@ -2762,12 +2762,6 @@ select:disabled {
   white-space: nowrap;
   cursor: pointer;
   transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
-}
-
-.hr-health-action-btn--accent {
-  border-color: var(--s2-action-border-accent);
-  background: var(--s2-action-bg-accent);
-  color: var(--s2-action-text-accent);
 }
 
 .hr-health-action-btn:not(:disabled) {
@@ -2786,11 +2780,6 @@ select:disabled {
   box-shadow:
     0 12px 20px rgba(var(--underpar-success-900), 0.22),
     0 0 0 1px rgba(var(--underpar-success-1100), 0.16);
-}
-
-.hr-health-action-btn--accent:hover:not(:disabled) {
-  background: linear-gradient(160deg, rgb(var(--underpar-success-800)), rgb(var(--underpar-success-1000)));
-  border-color: rgba(var(--underpar-success-1100), 0.92);
 }
 
 .hr-health-action-btn:focus-visible {

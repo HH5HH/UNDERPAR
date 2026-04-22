@@ -31,10 +31,7 @@ const UNDERPAR_BLONDIE_TIME_DEEPLINK_BRIDGE_PATH = "blondie-time-deeplink-bridge
 const UNDERPAR_TEMP_PASS_WORKSPACE_PATH = "temp-pass-workspace.html";
 const UNDERPAR_DEGRADATION_WORKSPACE_PATH = "degradation-workspace.html";
 const UNDERPAR_CM_WORKSPACE_PATH = "cm-workspace.html";
-const UNDERPAR_ESM_HEALTH_WORKSPACE_PATH = "esm-health-workspace.html";
-const UNDERPAR_CM_HEALTH_WORKSPACE_PATH = "cm-health-workspace.html";
 const UNDERPAR_REGISTERED_APPLICATION_HEALTH_WORKSPACE_PATH = "registered-application-health-workspace.html";
-const UNDERPAR_HEALTH_WORKSPACE_PATH = "health-workspace.html";
 const AVATAR_SIZE_PREFERENCES = [128, 64, 256, 32];
 const AUTH_DEBUGGER_PROTOCOL_VERSION = "1.3";
 const DEBUG_TRACE_EVENT_LIMIT = 15000;
@@ -100,10 +97,7 @@ const UNDERPAR_WORKSPACE_PATHS = Object.freeze([
   "mvpd-workspace.html",
   "mvpd-inspector.html",
   "rest-workspace.html",
-  "esm-health-workspace.html",
-  "cm-health-workspace.html",
   "registered-application-health-workspace.html",
-  "health-workspace.html",
   "temp-pass-workspace.html",
   "degradation-workspace.html",
   "bobtools-workspace.html",
@@ -151,18 +145,9 @@ const BUILD_FINGERPRINT_FILES = [
   "rest-workspace.html",
   "rest-workspace.css",
   "rest-workspace.js",
-  "esm-health-workspace.html",
-  "esm-health-workspace.css",
-  "esm-health-workspace.js",
-  "cm-health-workspace.html",
-  "cm-health-workspace.css",
-  "cm-health-workspace.js",
   "registered-application-health-workspace.html",
   "registered-application-health-workspace.css",
   "registered-application-health-workspace.js",
-  "health-workspace.html",
-  "health-workspace.css",
-  "health-workspace.js",
   "temp-pass-workspace.html",
   "temp-pass-workspace.css",
   "temp-pass-workspace.js",

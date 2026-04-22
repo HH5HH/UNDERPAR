@@ -1246,7 +1246,6 @@ body.workspace-locked .workspace-status {
   flex: 0 0 auto;
 }
 
-.esm-query-health-link,
 .esm-csv-link {
   appearance: none;
   display: inline-flex;
@@ -1270,8 +1269,6 @@ body.workspace-locked .workspace-status {
     color 140ms ease;
 }
 
-.esm-query-health-link:hover,
-.esm-query-health-link:focus-visible,
 .esm-csv-link:hover,
 .esm-csv-link:focus-visible {
   outline: none;
@@ -1281,11 +1278,6 @@ body.workspace-locked .workspace-status {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.32);
 }
 
-.esm-query-health-link:disabled {
-  opacity: 0.6;
-  cursor: default;
-  transform: none;
-}
 
 .esm-footer-controls {
   margin-left: auto;

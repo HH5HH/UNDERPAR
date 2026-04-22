@@ -24,10 +24,6 @@ test("background runtime source parses as valid JavaScript", () => {
   assertParses("background.js");
 });
 
-test("CM health workspace source parses as valid JavaScript", () => {
-  assertParses("cm-health-workspace.js");
-});
-
 test("registered application health workspace source parses as valid JavaScript", () => {
   assertParses("registered-application-health-workspace.js");
 });

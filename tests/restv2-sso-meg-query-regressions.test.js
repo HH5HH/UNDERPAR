@@ -65,30 +65,11 @@ function loadFunctions(relativePath, functionNames, globals = {}) {
   return context.module.exports;
 }
 
-test("CM ESM Health Scope saved query names prefer the captured MVPD label without double-appending the MVPD id", () => {
-  const { cmBuildEsmHealthXrefSavedQueryName } = loadFunctions("popup.js", ["cmBuildEsmHealthXrefSavedQueryName"], {
-    state: {
-      selectedRequestorId: "",
-      selectedMvpdId: "",
-    },
-    firstNonEmptyString: (values = []) => values.find((value) => String(value || "").trim()) || "",
-    getRestV2MvpdPickerLabel: () => "Xfinity (Comcast_SSO) (Comcast_SSO)",
-    popupNormalizeSavedEsmQueryName: (value = "") => String(value || "").replace(/\s+/g, " ").trim(),
-  });
+test("popup no longer exposes the removed CM ESM Health Scope helpers", () => {
+  const popupSource = read("popup.js");
 
-  const name = cmBuildEsmHealthXrefSavedQueryName(
-    {
-      title: "ESM Health Scope",
-      payload: {
-        requestorId: "MML",
-        mvpd: "Comcast_SSO",
-        mvpdLabel: "Xfinity (Comcast_SSO)",
-      },
-    },
-    null
-  );
-
-  assert.equal(name, "ESM Health Scope MML x Xfinity (Comcast_SSO)");
+  assert.doesNotMatch(popupSource, /cmBuildEsmHealthXrefSavedQueryName/);
+  assert.doesNotMatch(popupSource, /cmPersistEsmHealthXrefSavedQuery/);
 });
 
 test("saved-query name normalization collapses repeated MVPD tails in popup and MEG workspace helpers", () => {
@@ -143,21 +124,15 @@ test("HR context hydration readiness remains blocked until runtime services are 
   assert.equal(isProgrammerHrContextHydrationReady("ABC", { restV2: { guid: "rest-guid" } }), false);
 });
 
-test("HEALTH status hides SPLUNK when the selected media company has no premium scoped applications", () => {
+test("HEALTH status renders only the REG APPS action pill", () => {
   const { buildHrContextHealthStatusItemHtml } = loadFunctions("popup.js", ["buildHrContextHealthStatusItemHtml"], {
-    getHrContextSummary: () => ({ hasProgrammerContext: true }),
-    healthWorkspaceGetSelectionContext: () => ({
+    registeredApplicationHealthWorkspaceGetSelectionContext: () => ({
       programmerId: "WWE",
       programmerName: "WWE",
       requestorId: "WWE",
       environmentLabel: "Release Production",
     }),
-    getHealthWorkspacePremiumContextSnapshot: () => ({ services: {}, hydrationReady: true, esmAvailable: false }),
-    getCurrentPremiumAppsSnapshot: () => null,
-    getRuntimePremiumServicesSeed: () => null,
-    getDetectedPremiumServiceKeys: () => [],
     shouldHydrateAdobePassWorkflowForSession: () => true,
-    shouldShowCmService: () => false,
     escapeHtml: (value = "") => String(value || ""),
     state: {
       sessionReady: true,
@@ -168,6 +143,8 @@ test("HEALTH status hides SPLUNK when the selected media company has no premium 
   const html = buildHrContextHealthStatusItemHtml({ programmerId: "WWE", programmerName: "WWE" });
 
   assert.match(html, />REG APPS<\/button>/);
+  assert.doesNotMatch(html, />ESM<\/button>/);
+  assert.doesNotMatch(html, />CM<\/button>/);
   assert.doesNotMatch(html, />SPLUNK<\/button>/);
 });
 

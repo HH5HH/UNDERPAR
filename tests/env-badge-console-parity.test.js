@@ -14,7 +14,6 @@ test("workspace and popup surfaces import the shared console env badge styleshee
     "popup.css",
     "cm-workspace.css",
     "esm-workspace.css",
-    "esm-health-workspace.css",
     "degradation-workspace.css",
     "blondie-time-workspace.css",
     "meg-workspace.css",

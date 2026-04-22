@@ -5208,12 +5208,6 @@ function renderCardTable(cardState, rows, lastModified) {
               <div class="esm-footer">
                 <div class="underpar-export-actions">
                   ${buildBlondieButtonMarkup()}
-                  <button
-                    type="button"
-                    class="esm-query-health-link"
-                    title="Send this ESM query to ESM HEALTH Dashboard"
-                    aria-label="Send this ESM query to ESM HEALTH Dashboard"
-                  >ESM HEALTH</button>
                   <a href="#" class="esm-csv-link">CSV</a>
                 </div>
                 <div class="esm-footer-controls">
@@ -5246,7 +5240,6 @@ function renderCardTable(cardState, rows, lastModified) {
   const footerCell = cardState.bodyElement.querySelector(".esm-footer-cell");
   const lastModifiedLabel = cardState.bodyElement.querySelector(".esm-last-modified");
   const blondieButton = cardState.bodyElement.querySelector(".underpar-blondie-btn");
-  const healthLink = cardState.bodyElement.querySelector(".esm-query-health-link");
   const csvLink = cardState.bodyElement.querySelector(".esm-csv-link");
   const closeButton = cardState.bodyElement.querySelector(".esm-table-close");
 
@@ -5338,33 +5331,6 @@ function renderCardTable(cardState, rows, lastModified) {
         setStatus(result?.error || "Unable to download CSV.", "error");
       } else {
         setStatus("CSV download started.");
-      }
-    });
-  }
-
-  if (healthLink) {
-    healthLink.addEventListener("click", async (event) => {
-      event.preventDefault();
-      if (!ensureWorkspaceUnlocked()) {
-        return;
-      }
-      healthLink.disabled = true;
-      try {
-        const result = await sendWorkspaceAction("send-to-esm-health", {
-          card: getCardPayload(cardState),
-        });
-        if (!result?.ok) {
-          setStatus(result?.error || "Unable to open ESM HEALTH dashboard.", "error");
-          return;
-        }
-        const compareMode = String(result?.compareMode || "off").trim().toLowerCase();
-        const compareLabel = compareMode === "mom" ? "MoM" : compareMode === "yoy" ? "YoY" : "Current";
-        setStatus(
-          `Opened ${String(cardState?.displayNodeLabel || getEsmNodeLabel(cardState?.requestUrl || "") || "ESM query").trim()} in ESM HEALTH Dashboard (${compareLabel}).`,
-          "success"
-        );
-      } finally {
-        healthLink.disabled = false;
       }
     });
   }
