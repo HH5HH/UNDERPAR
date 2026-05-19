@@ -612,7 +612,7 @@ test("HARPO captured call counter excludes adobe support hosts that are not in t
   assert.equal(count, 1);
 });
 
-test("HARPO full workspace capture keeps page-level off-scope traffic while pass scoped count stays restricted", () => {
+test("HARPO live repro HAR export keeps configured requestor domains and drops off-scope page traffic", () => {
   const buildHarLogFromFlowSnapshot = loadHarpoFullCaptureBuilder();
   const har = buildHarLogFromFlowSnapshot(
     {
@@ -646,11 +646,35 @@ test("HARPO full workspace capture keeps page-level off-scope traffic while pass
           source: "web-request",
           phase: "onBeforeRequest",
           tabId: 91,
+          requestId: "wr-configured-domain",
+          method: "POST",
+          url: "https://watch.globaltv.com/authentication/checkauthentication",
+          type: "fetch",
+          timestampMs: 1020,
+        },
+        {
+          source: "web-request",
+          phase: "onCompleted",
+          tabId: 91,
+          requestId: "wr-configured-domain",
+          method: "POST",
+          url: "https://watch.globaltv.com/authentication/checkauthentication",
+          statusCode: 200,
+          statusLine: "HTTP/1.1 200 OK",
+          timestampMs: 1030,
+          responseHeaders: {
+            "content-type": "application/json",
+          },
+        },
+        {
+          source: "web-request",
+          phase: "onBeforeRequest",
+          tabId: 91,
           requestId: "wr-page-breakdown",
           method: "POST",
           url: "https://global.corusappservices.com/authentication/checkauthentication",
           type: "fetch",
-          timestampMs: 1020,
+          timestampMs: 1040,
         },
         {
           source: "web-request",
@@ -661,7 +685,7 @@ test("HARPO full workspace capture keeps page-level off-scope traffic while pass
           url: "https://global.corusappservices.com/authentication/checkauthentication",
           statusCode: 500,
           statusLine: "HTTP/1.1 500 Internal Server Error",
-          timestampMs: 1030,
+          timestampMs: 1050,
           responseHeaders: {
             "content-type": "text/html",
           },
@@ -681,8 +705,9 @@ test("HARPO full workspace capture keeps page-level off-scope traffic while pass
   const urls = Array.from(har.log.entries || [], (entry) => entry?.request?.url || "");
   assert.equal(urls.length, 2);
   assert.ok(urls.includes("https://api.auth.adobe.com/api/v2/globaltv/configuration"));
-  assert.ok(urls.includes("https://global.corusappservices.com/authentication/checkauthentication"));
-  assert.equal(har.log._underpar.context.harpoPassScopedEntryCount, 1);
+  assert.ok(urls.includes("https://watch.globaltv.com/authentication/checkauthentication"));
+  assert.equal(urls.includes("https://global.corusappservices.com/authentication/checkauthentication"), false);
+  assert.equal(har.log._underpar.context.harpoPassScopedEntryCount, 2);
 });
 
 test("HARPO workspace ALL view retains supporting page-level traffic in full mode", () => {

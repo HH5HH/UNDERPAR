@@ -35129,12 +35129,15 @@ function shouldExcludeInternalExtensionHarEntry(entry = null) {
 function buildHarLogFromFlowSnapshot(flowSnapshot, context = null, logoutResult = null) {
   const flowEvents = Array.isArray(flowSnapshot?.events) ? flowSnapshot.events : [];
   const isHarpoCapture = String(context?.serviceType || "").trim().toLowerCase() === "harpo";
+  const webRequestEntries = buildWebRequestHarEntries(flowEvents, context);
   const harpoScopedCapture =
-    isHarpoCapture ? buildHarpoScopedCaptureResult(flowEvents, context) : null;
-  const rawEntries = [
-    ...buildWebRequestHarEntries(flowEvents, context),
-    ...buildExtensionHarEntries(flowEvents),
-  ];
+    isHarpoCapture ? filterHarpoScopedHarEntries(webRequestEntries, context) : null;
+  const rawEntries = isHarpoCapture
+    ? harpoScopedCapture.entries
+    : [
+        ...webRequestEntries,
+        ...buildExtensionHarEntries(flowEvents),
+      ];
   const entries = rawEntries
     .filter((entry) => !shouldExcludeInternalExtensionHarEntry(entry))
     .sort((a, b) => {
@@ -69547,7 +69550,7 @@ function collectRequestorScopedConfiguredDomainNames(requestorId = "") {
 
 function collectRestV2LearningRequestorDomainNames(programmer = null, requestorId = "") {
   const resolvedRequestorId = String(extractEntityIdFromToken(requestorId) || "").trim();
-  const normalizedRequestorId = resolvedRequestorId;
+  const normalizedRequestorId = resolvedRequestorId.toLowerCase();
   if (!normalizedRequestorId) {
     return [];
   }
@@ -69594,7 +69597,7 @@ function collectRestV2LearningRequestorDomainNames(programmer = null, requestorI
     ]
       .map((value) => String(extractEntityIdFromToken(value) || "").trim())
       .filter(Boolean);
-    return candidateIds.includes(normalizedRequestorId);
+    return candidateIds.some((candidateId) => candidateId.toLowerCase() === normalizedRequestorId);
   };
 
   const channelCandidates = [
