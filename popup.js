@@ -64649,16 +64649,15 @@ function degradationSyncCheatSheetButton(panelState) {
   const cheatSheetRow = panelState?.cheatSheetRow || null;
   const cheatButton = panelState?.copyCurlButton || null;
   const qualified = degradationHasQualifiedCheatSheetContext(panelState);
-  const hasRequestor = Boolean(String(state.selectedRequestorId || "").trim());
   const unavailableMessage = "Select Environment x Media Company, RequestorId, and MVPD first";
 
   if (cheatSheetRow) {
-    cheatSheetRow.hidden = !hasRequestor;
+    cheatSheetRow.hidden = false;
   }
   if (!cheatButton) {
     return;
   }
-  cheatButton.hidden = !qualified;
+  cheatButton.hidden = false;
   cheatButton.disabled = panelState?.busy === true || !qualified;
   if (qualified) {
     cheatButton.title = "Open the DEGRADATION Cheat Sheet in the workspace using the current global RequestorId and MVPD";
@@ -66766,6 +66765,20 @@ function degradationBuildControllerHtml(programmer, appInfo) {
   const goHiddenAttr = hasRequestor ? "" : " hidden";
   const requestorControlsHiddenAttr = hasRequestor ? "" : " hidden";
   const goButtonLabel = degradationBuildGoButtonLabel();
+  const cheatSheetQualified = Boolean(
+    String(
+      getActiveAdobePassEnvironment()?.key || getActiveAdobePassEnvironmentKey() || DEFAULT_ADOBEPASS_ENVIRONMENT.key || ""
+    ).trim() &&
+      String(programmer?.programmerId || "").trim() &&
+      String(appInfo?.guid || "").trim() &&
+      String(state.selectedRequestorId || "").trim() &&
+      String(state.selectedMvpdId || "").trim()
+  );
+  const cheatSheetUnavailableMessage = "Select Environment x Media Company, RequestorId, and MVPD first";
+  const cheatSheetTitle = cheatSheetQualified
+    ? "Open the DEGRADATION Cheat Sheet in the workspace using the current global RequestorId and MVPD"
+    : cheatSheetUnavailableMessage;
+  const cheatSheetDisabledAttr = cheatSheetQualified ? "" : " disabled";
   return `
     <div class="degradation-runner-actions">
       <div class="degradation-runner-form"${requestorControlsHiddenAttr}>
@@ -66789,12 +66802,13 @@ function degradationBuildControllerHtml(programmer, appInfo) {
         <span class="degradation-record-btn-icon degradation-record-btn-icon--record" aria-hidden="true"></span>
       </button>
     </div>
-    <div class="degradation-cheat-sheet-row degradation-utility-row"${requestorControlsHiddenAttr}>
+    <div class="degradation-cheat-sheet-row degradation-utility-row">
       <button
         type="button"
         class="degradation-copy-curl-btn"
-        title="Open the DEGRADATION Cheat Sheet in the workspace using the current global RequestorId and MVPD"
-        aria-label="Open the DEGRADATION Cheat Sheet in the workspace using the current global RequestorId and MVPD"
+        title="${escapeHtml(cheatSheetTitle)}"
+        aria-label="${escapeHtml(cheatSheetTitle)}"
+        ${cheatSheetDisabledAttr}
       >
         CHEAT SHEET
       </button>

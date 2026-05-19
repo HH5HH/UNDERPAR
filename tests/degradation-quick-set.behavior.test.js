@@ -31,10 +31,20 @@ test("DEGRADATION controller exposes a workspace cheat-sheet flow without quick-
     popupSource,
     /<div class="degradation-runner-actions">[\s\S]*?<div class="degradation-runner-form"[\s\S]*?class="degradation-endpoint-select"[\s\S]*?class="degradation-run-go-btn"[\s\S]*?class="degradation-record-toggle-btn"[\s\S]*?<\/div>\s*<div class="degradation-cheat-sheet-row degradation-utility-row"[\s\S]*?class="degradation-copy-curl-btn"[\s\S]*?CHEAT SHEET[\s\S]*?class="degradation-make-clickdgr-btn esm-workspace-toolbar-icon-btn esm-workspace-toolbar-icon-btn--tearsheet"/
   );
+  assert.match(popupSource, /<div class="degradation-cheat-sheet-row degradation-utility-row">/);
+  assert.doesNotMatch(
+    popupSource,
+    /<div class="degradation-cheat-sheet-row degradation-utility-row"\$\{requestorControlsHiddenAttr\}>/
+  );
   assert.doesNotMatch(popupSource, /class="degradation-controller-status"/);
   assert.doesNotMatch(popupSource, /class="degradation-controller-shell"/);
   assert.match(popupSource, /function degradationHasQualifiedCheatSheetContext\(/);
   assert.match(popupSource, /function degradationSyncCheatSheetButton\(/);
+  assert.match(popupSource, /cheatSheetRow\.hidden = false;/);
+  assert.match(popupSource, /cheatButton\.hidden = false;/);
+  assert.doesNotMatch(popupSource, /cheatSheetRow\.hidden = !hasRequestor;/);
+  assert.doesNotMatch(popupSource, /cheatButton\.hidden = !qualified;/);
+  assert.match(popupSource, /const cheatSheetDisabledAttr = cheatSheetQualified \? "" : " disabled";/);
   assert.match(popupSource, /Select Environment x Media Company, RequestorId, and MVPD first/);
   assert.doesNotMatch(popupSource, /class="degradation-quick-set-select"/);
   assert.doesNotMatch(popupSource, /class="degradation-quick-set-btn"/);
